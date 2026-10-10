@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f5fa">
+  <title>GTD · Taskmanager</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m9 16.2-3.5-3.5L4 14.2l5 5 11-11-1.5-1.5z"/></symbol>
+    <symbol id="i-add" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 5 1.5-1.5-5-5zm-5 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"/></symbol>
+    <symbol id="i-label" viewBox="0 0 24 24"><path d="M17.63 5.84C17.27 5.33 16.68 5 16 5H5c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h11c.68 0 1.27-.33 1.63-.84L22 12l-4.37-6.16z"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 .01 4.01A2 2 0 0 0 12 10zm0 6a2 2 0 1 0 .01 4.01A2 2 0 0 0 12 16z"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24"><path d="M9 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM9 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-6 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zM20.7 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></symbol>
+    <symbol id="i-delete" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m19 6.4-1.4-1.4L12 10.6 6.4 5 5 6.4l5.6 5.6L5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6z"/></symbol>
+    <symbol id="i-board" viewBox="0 0 24 24"><path d="M4 4h7v16H4zm9 0h7v10h-7zm0 12h7v4h-7z"/></symbol>
+    <symbol id="i-markdown" viewBox="0 0 24 24"><path d="M5 5h14v14H5zM7 15h2v-3l2 2.5 2-2.5v3h2V9h-2l-2 2.5L9 9H7zm10-2h2l-1 1.5z"/></symbol><symbol id="i-sun" viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm-1-6h2v3h-2zm0 17h2v3h-2zM4.93 3.51l1.41 1.42 2.12 2.12-1.41 1.41-2.12-2.12-1.41-1.41zm11.31 11.32 1.42-1.42 2.12 2.12 1.41 1.41-1.41 1.41-2.12-2.12zM2 11h3v2H2zm17 0h3v2h-3zM4.93 20.49l-1.41-1.41 2.12-2.12 1.41-1.41 1.41 1.41-2.12 2.12zm14.14 0-2.12-2.12-1.41-1.41 1.41-1.41 2.12 2.12 1.41 1.41zM16.24 6.34l2.12-2.12 1.41-1.41 1.41 1.41-1.41 1.41-2.12 2.12z"/></symbol><symbol id="i-moon" viewBox="0 0 24 24"><path d="M9.37 5.51A7.5 7.5 0 0 0 18.49 14.6 7.5 7.5 0 1 1 9.37 5.5z"/></symbol>
+    <symbol id="i-transfer" viewBox="0 0 24 24"><path d="M7 3 3 7h3v7h2V7h3L7 3zm10 18 4-4h-3v-7h-2v7h-3l4 4z"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zM11 16h2V9h3l-4-5-4 5h3z"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zm7-16h-2v7H7l5 5 5-5h-3z"/></symbol>
+  </svg>
+  <section class="access-gate" id="accessGate" aria-label="Board-Zugang">
+    <form class="access-card" id="accessForm">
+      <span class="access-mark"><svg><use href="#i-board"/></svg></span>
+      <h1>Aufgaben</h1>
+      <p>Gib das Passwort ein, um das Board zu öffnen.</p>
+      <label class="field access-password-field"><span>Passwort</span><input id="accessPassword" type="password" autocomplete="current-password" required autofocus></label>
+      <p class="access-error" id="accessError" role="alert" aria-live="polite"></p>
+      <button class="button button-primary" type="submit">Board öffnen</button>
+    </form>
+  </section>
+  <div class="app-shell">
+    <header class="topbar"><div class="crumb"><strong>Aufgaben</strong></div><div class="top-actions"><label class="search-box"><svg><use href="#i-search"/></svg><input id="searchInput" type="search" placeholder="Suchen" aria-label="Tasks suchen"><kbd>⌘ K</kbd></label><button class="icon-button theme-toggle" id="themeToggle" type="button" aria-label="Dunkles Design aktivieren" title="Dunkles Design aktivieren"><svg><use href="#i-moon"/></svg></button><button class="icon-button data-transfer-toggle" id="dataTransferToggle" type="button" aria-label="Daten importieren und exportieren" title="Daten importieren und exportieren"><svg><use href="#i-transfer"/></svg></button><button class="button button-tonal top-manage-labels" id="manageLabels" type="button" title="Labels verwalten" aria-label="Labels verwalten"><svg><use href="#i-label"/></svg><span>Labels verwalten</span></button></div></header>
+    <main class="main-content">
+      <section class="board-viewport" aria-label="Kanbanboard"><div class="board" id="board" aria-live="polite"></div><button class="add-column" id="addColumn" type="button"><span class="add-column-icon"><svg><use href="#i-add"/></svg></span><span>Spalte hinzufügen</span></button></section>
+    </main>
+  </div>
+  <dialog class="modal task-modal" id="taskDialog"><form id="taskForm" method="dialog">
+    <div class="modal-header"><div><div class="eyebrow" id="taskEyebrow">NEUER EINTRAG</div><h2 id="taskDialogTitle">Task erstellen</h2></div><button class="icon-button close-button" type="button" data-close="taskDialog" aria-label="Schließen"><svg><use href="#i-close"/></svg></button></div>
+    <div class="modal-body">
+      <label class="field"><span>Titel <b class="required">*</b></span><input id="taskTitle" name="title" maxlength="160" required placeholder="Was möchtest du erledigen?"></label>
+      <div class="field-row"><label class="field"><span>Spalte</span><select id="taskColumn" name="column"></select></label><label class="field"><span>Fälligkeitsdatum <small>Optional</small></span><input id="taskDue" name="due" type="date"></label></div>
+      <div class="field"><span>Labels <small>Optional · max. 2</small></span><div class="label-picker" id="taskLabels"></div><div class="label-selection-note" id="labelSelectionNote">0 von 2 Labels ausgewählt</div><button class="text-button" type="button" id="labelsFromTask">+ Labels verwalten</button></div>
+      <div class="field description-field" id="descriptionField"><div class="field-title"><span>Beschreibung <small>Optional</small></span><span class="markdown-hint"><svg><use href="#i-markdown"/></svg>Markdown</span></div><div class="description-display" id="descriptionDisplay" tabindex="0" aria-label="Beschreibung. Klicken zum Bearbeiten."><div class="description-rendered" id="descriptionRendered"></div><span class="description-edit-hint">Zum Bearbeiten klicken</span></div><textarea class="hidden" id="taskDescription" name="description" rows="7" placeholder="Schreibe eine Beschreibung in Markdown …&#10;&#10;**Fett**, [Link](https://example.com), ![Bild](https://…)"></textarea></div>
+      <div class="created-at-row"><div class="created-at" id="createdAtNote">Das Erstelldatum wird automatisch gesetzt.</div><button class="button button-tonal description-copy-button hidden" id="copyDescription" type="button">Beschreibung kopieren</button></div>
+    </div>
+    <div class="modal-footer"><button class="button button-text danger-button hidden" id="deleteTask" type="button"><svg><use href="#i-delete"/></svg>Löschen</button><span class="footer-spacer"></span><button class="button button-text" type="button" data-close="taskDialog">Abbrechen</button><button class="button button-primary" type="submit">Speichern</button></div>
+  </form></dialog>
+  <dialog class="modal small-modal" id="labelsDialog"><form id="labelForm" method="dialog">
+    <div class="modal-header"><div><div class="eyebrow">BOARD-EINSTELLUNGEN</div><h2>Labels verwalten</h2></div><button class="icon-button close-button" type="button" data-close="labelsDialog" aria-label="Schließen"><svg><use href="#i-close"/></svg></button></div>
+    <div class="modal-body"><div class="label-manager-meta"><span id="labelCount">0 Labels</span><span>Keine feste Obergrenze</span></div><div class="label-list" id="labelList"></div><div class="divider"></div><h3 id="labelEditorHeading">Neues Label</h3><input id="labelId" type="hidden"><div class="label-editor"><label class="field"><span>Name</span><input id="labelName" maxlength="32" required placeholder="z. B. Arbeit"></label><label class="field color-field"><span>Farbe</span><input id="labelColor" type="color" value="#6750a4" aria-label="Label-Farbe"></label></div></div>
+    <div class="modal-footer"><button class="button button-text" type="button" id="resetLabelEditor">Zurücksetzen</button><span class="footer-spacer"></span><button class="button button-text" type="button" data-close="labelsDialog">Fertig</button><button class="button button-primary" type="submit">Label speichern</button></div>
+  </form></dialog>
+  <dialog class="modal small-modal" id="columnDialog"><form id="columnForm" method="dialog">
+    <div class="modal-header"><div><div class="eyebrow">BOARD-EINSTELLUNGEN</div><h2 id="columnDialogTitle">Spalte hinzufügen</h2></div><button class="icon-button close-button" type="button" data-close="columnDialog" aria-label="Schließen"><svg><use href="#i-close"/></svg></button></div>
+    <div class="modal-body"><input id="columnId" type="hidden"><label class="field"><span>Name</span><input id="columnName" required maxlength="40" placeholder="z. B. Warten auf"></label><p class="helper-text">Ziehe Spalten am Griff in die gewünschte Reihenfolge.</p></div>
+    <div class="modal-footer"><button class="button button-text danger-button hidden" id="deleteColumn" type="button"><svg><use href="#i-delete"/></svg>Spalte löschen</button><span class="footer-spacer"></span><button class="button button-text" type="button" data-close="columnDialog">Abbrechen</button><button class="button button-primary" type="submit">Speichern</button></div>
+  </form></dialog>
+  <dialog class="modal small-modal" id="dataDialog" aria-labelledby="dataDialogTitle">
+    <div class="modal-header"><div><div class="eyebrow">DATENSICHERUNG</div><h2 id="dataDialogTitle">Daten importieren und exportieren</h2></div><button class="icon-button close-button" type="button" data-close="dataDialog" aria-label="Schließen"><svg><use href="#i-close"/></svg></button></div>
+    <div class="modal-body"><p class="helper-text">Exportiere Tasks, Spalten und Labels als JSON-Datei oder importiere ein zuvor exportiertes Backup.</p><div class="data-transfer-actions"><button class="button button-tonal" id="exportData" type="button"><svg><use href="#i-export"/></svg>Daten exportieren</button><button class="button button-tonal" id="chooseImportFile" type="button"><svg><use href="#i-import"/></svg>Daten importieren</button><input class="hidden" id="importDataFile" type="file" accept=".json,application/json"></div><p class="helper-text">Beim Import werden die aktuell gespeicherten Boarddaten ersetzt.</p><p class="helper-text data-transfer-status" id="dataTransferStatus" aria-live="polite"></p></div>
+    <div class="modal-footer"><span class="footer-spacer"></span><button class="button button-text" type="button" data-close="dataDialog">Schließen</button></div>
+  </dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body></html>
