@@ -9,6 +9,9 @@ const escapeDeclaration=source.match(/  const esc=.*;\n/)[0];
 const renderers=source.slice(source.indexOf('  function plainDescription('),source.indexOf('  function linkifyHtml('));
 const context={};
 vm.runInNewContext(escapeDeclaration+renderers+'\nthis.render=inlineMarkdown;this.plain=plainDescription;',context);
+const listRenderers=source.slice(source.indexOf('  function listItemHtml('),source.indexOf('  function cardHtml('));
+context.linkifyHtml=html=>html;
+vm.runInNewContext(listRenderers+'\nthis.renderBlocks=markdownToHtml;',context);
 
 test('a direct WebP URL renders as an image',()=>{
   assert.equal(context.render('![Foto](https://example.com/photo.webp)'),'<img src="https://example.com/photo.webp" alt="Foto" loading="lazy">');
@@ -49,4 +52,33 @@ test('link formatting does not change the link URL',()=>{
 test('HTML in image labels and description text is escaped',()=>{
   const html=context.render('![" onerror="example](https://example.com/photo.webp) <script>example</script>');
   assert.equal(html,'<img src="https://example.com/photo.webp" alt="&quot; onerror=&quot;example" loading="lazy"> &lt;script&gt;example&lt;/script&gt;');
+});
+
+test('nested lists keep children inside their parent and return to previous levels',()=>{
+  const markdown='- Parent\n    - Child\n        - Grandchild\n    - Second child\n- Sibling';
+  assert.equal(context.renderBlocks(markdown),'<ul><li>Parent<ul><li>Child<ul><li>Grandchild</li></ul></li><li>Second child</li></ul></li><li>Sibling</li></ul>');
+});
+test('ordered and unordered lists can nest and preserve their starting number',()=>{
+  const markdown='3. Parent\n    - Child\n        2. Grandchild\n4. Sibling';
+  assert.equal(context.renderBlocks(markdown),'<ol start="3"><li>Parent<ul><li>Child<ol start="2"><li>Grandchild</li></ol></li></ul></li><li>Sibling</li></ol>');
+});
+test('tabs and mixed leading whitespace use four-space tab stops',()=>{
+  const spaces='- Parent\n    - Child\n        - Grandchild\n    - Second child';
+  const tabs='- Parent\n\t- Child\n\t\t- Grandchild\n  \t- Second child';
+  assert.equal(context.renderBlocks(tabs),context.renderBlocks(spaces));
+});
+test('blank lines preserve nesting and original checkbox line numbers',()=>{
+  const html=context.renderBlocks('- [ ] Parent\n\n\t- [x] Child\n\n- Sibling');
+  assert.match(html,/<div class="checklist-content">Parent<ul><li class="checklist-item">/);
+  assert.match(html,/data-checklist-line="0"/);
+  assert.match(html,/data-checklist-line="2"[^>]*checked/);
+  assert.match(html,/<\/div><\/li><\/ul><\/div><\/li><li>Sibling<\/li><\/ul>$/);
+});
+test('list type changes and following blocks close every nested item',()=>{
+  const html=context.renderBlocks('- Parent\n    - Bullet\n    1. Number\n\n# Heading\nText');
+  assert.equal(html,'<ul><li>Parent<ul><li>Bullet</li></ul><ol><li>Number</li></ol></li></ul><h1>Heading</h1><p>Text</p>');
+});
+test('indented continuation text stays with its list item and HTML stays escaped',()=>{
+  const html=context.renderBlocks('- Parent\n    Continuation\n    - <script>example</script>');
+  assert.equal(html,'<ul><li>Parent<br>Continuation<ul><li>&lt;script&gt;example&lt;/script&gt;</li></ul></li></ul>');
 });

@@ -225,19 +225,35 @@
   }
   function listItemHtml(source,lineIndex){
     const checkbox=source.match(/^\[\s*([xX])?\s*\]\s*(.*)$/);
-    if(!checkbox)return "<li>"+inlineMarkdown(source)+"</li>";
-    return '<li class="checklist-item"><input type="checkbox" data-checklist-line="'+lineIndex+'" aria-label="Checklisteneintrag erledigt" '+(checkbox[1]?"checked":"")+'>'+inlineMarkdown(checkbox[2])+"</li>";
+    if(!checkbox)return {start:"<li>"+inlineMarkdown(source),end:"</li>"};
+    return {start:'<li class="checklist-item"><input type="checkbox" data-checklist-line="'+lineIndex+'" aria-label="Checklisteneintrag erledigt" '+(checkbox[1]?"checked":"")+'><div class="checklist-content">'+inlineMarkdown(checkbox[2]),end:"</div></li>"};
   }
   function markdownToHtml(markdown){
-    const lines=String(markdown||"").replace(/\r/g,"").split("\n");let html="",list="";
-    const closeList=()=>{if(list){html+="</"+list+">";list="";}};
-    for(let lineIndex=0;lineIndex<lines.length;lineIndex++){const line=lines[lineIndex];if(!line.trim()){closeList();continue;}let match;
-      if((match=line.match(/^(#{1,3})\s+(.+)$/))){closeList();const level=match[1].length;html+="<h"+level+">"+inlineMarkdown(match[2])+"</h"+level+">";}
-      else if((match=line.match(/^\s*>\s?(.*)$/))){closeList();html+="<blockquote>"+inlineMarkdown(match[1])+"</blockquote>";}
-      else if((match=line.match(/^\s*[-*+]\s*(.*)$/))){if(list!=="ul"){closeList();html+="<ul>";list="ul";}html+=listItemHtml(match[1],lineIndex);}
-      else if((match=line.match(/^\s*\d+\.\s*(.*)$/))){if(list!=="ol"){closeList();html+="<ol>";list="ol";}html+=listItemHtml(match[1],lineIndex);}
-      else{closeList();html+="<p>"+inlineMarkdown(line)+"</p>";}
-    }closeList();return linkifyHtml(html);
+    const lines=String(markdown||"").replace(/\r/g,"").split("\n"),lists=[];let html="";
+    const closeItem=list=>{html+=list.itemEnd;list.itemEnd="";};
+    const closeList=()=>{const list=lists.pop();closeItem(list);html+="</"+list.type+">";};
+    const closeLists=()=>{while(lists.length)closeList();};
+    for(let lineIndex=0;lineIndex<lines.length;lineIndex++){
+      const original=lines[lineIndex];if(!original.trim())continue;
+      // Tabs advance to the next four-space stop; retain the original line numbers for checkboxes.
+      const line=original.replace(/^[ \t]+/,whitespace=>{let width=0;for(const char of whitespace)width+=char==="\t"?4-width%4:1;return " ".repeat(width);});
+      const entry=line.match(/^( *)([-*+]|\d+\.)(?:[ \t]+(.*)|$)/);let match;
+      if(entry){
+        const indent=entry[1].length,type=/\d/.test(entry[2])?"ol":"ul";
+        while(lists.length&&indent<lists[lists.length-1].indent)closeList();
+        let list=lists[lists.length-1];
+        if(list&&indent===list.indent){if(type!==list.type){closeList();list=lists[lists.length-1];}else closeItem(list);}
+        if(!list||indent>list.indent){
+          const start=type==="ol"?Number(entry[2].slice(0,-1)):1;
+          html+="<"+type+(type==="ol"&&start!==1?' start="'+start+'"':"")+">";
+          list={indent,type,itemEnd:""};lists.push(list);
+        }
+        const item=listItemHtml(entry[3]||"",lineIndex);html+=item.start;list.itemEnd=item.end;
+      }else if(lists.length&&line.match(/^ */)[0].length>lists[lists.length-1].indent){html+="<br>"+inlineMarkdown(line.trimStart());}
+      else if((match=line.match(/^(#{1,3})\s+(.+)$/))){closeLists();const level=match[1].length;html+="<h"+level+">"+inlineMarkdown(match[2])+"</h"+level+">";}
+      else if((match=line.match(/^\s*>\s?(.*)$/))){closeLists();html+="<blockquote>"+inlineMarkdown(match[1])+"</blockquote>";}
+      else{closeLists();html+="<p>"+inlineMarkdown(original)+"</p>";}
+    }closeLists();return linkifyHtml(html);
   }
   function cardHtml(task){
     const labels=(task.labelIds||[]).slice(0,2).map(labelById).filter(Boolean).map(label=>'<span class="label-chip" style="'+labelStyle(label.color)+'"><span class="label-dot"></span>'+esc(label.name)+'</span>').join("");
@@ -378,6 +394,8 @@
         autoRefresh:{delay:300},
         forceSync:true,
         lineWrapping:true,
+        tabSize:4,
+        indentWithTabs:false,
         maxHeight:"280px",
         placeholder:"Schreibe eine Beschreibung in Markdown …",
         previewRender:markdownToHtml,
