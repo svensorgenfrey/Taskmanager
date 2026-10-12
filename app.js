@@ -7,6 +7,50 @@
   const createWorkspace=(data=starter())=>({activeBoardId:"board-default",boards:[{id:"board-default",name:"Aufgaben",data}]});
   let workspace=createWorkspace(),state=workspace.boards[0].data,draggedTask=null,draggedColumn=null,toastTimer=0,databasePromise=null,persistenceQueue=Promise.resolve(),persistenceHealthy=true,storageWarningShown=false,boardChannel=null;
   const $=id=>document.getElementById(id),boardEl=$("board");
+  const boardViewport=boardEl.closest(".board-viewport");
+  let dragScrollPoint=null,dragScrollFrame=0,dragScrollLastTime=0;
+  function stopTaskAutoScroll(){
+    if(dragScrollFrame)cancelAnimationFrame(dragScrollFrame);
+    dragScrollFrame=0;dragScrollLastTime=0;dragScrollPoint=null;
+  }
+  function updateTaskDropFeedback(x,y){
+    const target=document.elementFromPoint(x,y),column=target&&target.closest(".column");
+    boardEl.querySelectorAll(".drag-over,.drop-target,.drop-before,.drop-after").forEach(node=>node.classList.remove("drag-over","drop-target","drop-before","drop-after"));
+    if(!column||!boardEl.contains(column))return;
+    const header=target.closest(".column-header"),card=header?column.querySelector(".task-card:not(.dragging)"):target.closest(".task-card");
+    if(card&&card.dataset.taskId!==draggedTask){
+      const rect=card.getBoundingClientRect(),after=!header&&y>rect.top+rect.height/2;
+      card.classList.add("drop-target",after?"drop-after":"drop-before");
+    }else column.querySelector(".column-list").classList.add("drag-over");
+  }
+  function scrollDraggedTask(time){
+    dragScrollFrame=0;
+    if(!draggedTask||!dragScrollPoint){dragScrollLastTime=0;return;}
+    const rect=boardViewport.getBoundingClientRect(),header=boardEl.querySelector(".column-header");
+    const top=rect.top+(header?header.getBoundingClientRect().height:0),bottom=rect.top+boardViewport.clientHeight;
+    const edge=Math.min(100,(bottom-top)/3),y=dragScrollPoint.y;
+    const proximity=y<top+edge?-Math.min(1,(top+edge-y)/edge):y>bottom-edge?Math.min(1,(y-bottom+edge)/edge):0;
+    if(!proximity||edge<=0){dragScrollLastTime=0;return;}
+    const elapsed=dragScrollLastTime?Math.min(32,time-dragScrollLastTime):16;
+    dragScrollLastTime=time;
+    const previous=boardViewport.scrollTop;
+    boardViewport.scrollTop+=Math.sign(proximity)*proximity*proximity*1100*elapsed/1000;
+    if(boardViewport.scrollTop===previous){dragScrollLastTime=0;return;}
+    updateTaskDropFeedback(dragScrollPoint.x,dragScrollPoint.y);
+    dragScrollFrame=requestAnimationFrame(scrollDraggedTask);
+  }
+  document.addEventListener("dragover",event=>{
+    if(!draggedTask)return;
+    const rect=boardViewport.getBoundingClientRect();
+    if(event.clientX<rect.left||event.clientX>=rect.left+boardViewport.clientWidth||event.clientY<rect.top||event.clientY>=rect.top+boardViewport.clientHeight){stopTaskAutoScroll();return;}
+    dragScrollPoint={x:event.clientX,y:event.clientY};
+    updateTaskDropFeedback(event.clientX,event.clientY);
+    if(!dragScrollFrame)dragScrollFrame=requestAnimationFrame(scrollDraggedTask);
+  },true);
+  document.addEventListener("drop",stopTaskAutoScroll,true);
+  document.addEventListener("dragend",()=>{stopTaskAutoScroll();draggedTask=null;boardEl.querySelectorAll(".drag-over,.drop-target,.dragging,.drop-before,.drop-after").forEach(node=>node.classList.remove("drag-over","drop-target","dragging","drop-before","drop-after"));},true);
+  document.addEventListener("dragleave",event=>{if(!event.relatedTarget&&(event.target===document.documentElement||event.target===document))stopTaskAutoScroll();});
+  window.addEventListener("blur",stopTaskAutoScroll);
   function openDatabase(){
     if(databasePromise)return databasePromise;
     databasePromise=new Promise((resolve,reject)=>{
@@ -208,6 +252,7 @@
     return '<section class="column" data-column-id="'+esc(column.id)+'"><header class="column-header" draggable="true" data-column-grip="'+esc(column.id)+'"><button type="button" class="icon-button column-grip" tabindex="-1" aria-label="Spalte verschieben"><svg><use href="#i-grip"/></svg></button><span class="column-title">'+esc(column.name)+'</span><span class="column-count">'+tasks.length+'</span><div class="column-actions"><button type="button" class="icon-button" data-edit-column="'+esc(column.id)+'" aria-label="Spalte bearbeiten"><svg><use href="#i-more"/></svg></button></div></header><div class="column-list" data-drop-column="'+esc(column.id)+'">'+(visible.length?visible.map(cardHtml).join(""):(query?'<div class="empty-column">Keine passenden Tasks</div>':tasks.length?"":'<div class="empty-column">Hier ist noch Platz für deinen nächsten Task.</div>'))+'<button type="button" class="add-task-inline" data-new-task="'+esc(column.id)+'"><svg><use href="#i-add"/></svg>Task hinzufügen</button></div></section>';
   }
   function render(){
+    stopTaskAutoScroll();
     $("boardSelect").innerHTML=workspace.boards.map(board=>'<option value="'+esc(board.id)+'">'+esc(board.name)+'</option>').join("");
     $("boardSelect").value=workspace.activeBoardId;
     $("boardSelect").title=workspace.boards.find(board=>board.id===workspace.activeBoardId).name;
@@ -216,7 +261,7 @@
   }
   function clearBoardContext(){
     ["taskDialog","labelsDialog","columnDialog"].forEach(id=>{if($(id).open)$(id).close();});
-    draggedTask=null;draggedColumn=null;$("searchInput").value="";
+    stopTaskAutoScroll();draggedTask=null;draggedColumn=null;$("searchInput").value="";
     if(descriptionEditing)setDescriptionEditing(false);
     const viewport=document.querySelector(".board-viewport");viewport.scrollLeft=0;viewport.scrollTop=0;
   }
@@ -281,15 +326,15 @@
       card.addEventListener("click",event=>{if(event.target.closest("button"))return;openTask(card.dataset.taskId);});
       card.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openTask(card.dataset.taskId);}});
       card.addEventListener("dragstart",event=>{draggedTask=card.dataset.taskId;draggedColumn=null;event.dataTransfer.setData("text/plain",draggedTask);event.dataTransfer.effectAllowed="move";card.classList.add("dragging");});
-      card.addEventListener("dragend",()=>{draggedTask=null;boardEl.querySelectorAll(".drag-over,.drop-target,.dragging,.drop-before,.drop-after").forEach(node=>node.classList.remove("drag-over","drop-target","dragging","drop-before","drop-after"));});
-      card.addEventListener("dragover",event=>{if(!draggedTask)return;event.preventDefault();event.stopPropagation();boardEl.querySelectorAll(".task-card.drop-target").forEach(node=>{if(node!==card)node.classList.remove("drop-target","drop-before","drop-after");});const rect=card.getBoundingClientRect();const after=event.clientY>rect.top+rect.height/2;card.classList.add("drop-target");card.classList.toggle("drop-before",!after);card.classList.toggle("drop-after",after);});
+      card.addEventListener("dragover",event=>{if(!draggedTask)return;event.preventDefault();event.stopPropagation();});
       card.addEventListener("dragleave",event=>{if(event.relatedTarget&&card.contains(event.relatedTarget))return;card.classList.remove("drop-target","drop-before","drop-after");});
       card.addEventListener("drop",event=>{if(!draggedTask)return;event.preventDefault();event.stopPropagation();if(card.dataset.taskId===draggedTask)return;const destinationId=card.closest(".column").dataset.columnId;const ordered=tasksIn(destinationId).filter(task=>task.id!==draggedTask);const targetIndex=ordered.findIndex(task=>task.id===card.dataset.taskId);const rect=card.getBoundingClientRect();const after=event.clientY>rect.top+rect.height/2;const before=ordered[targetIndex+(after?1:0)];moveTask(draggedTask,destinationId,before?before.id:null);});
     });
-    boardEl.querySelectorAll(".column-list").forEach(list=>{
-      list.addEventListener("dragover",event=>{if(!draggedTask)return;event.preventDefault();list.classList.add("drag-over");});
-      list.addEventListener("dragleave",event=>{if(event.target===list)list.classList.remove("drag-over");});
-      list.addEventListener("drop",event=>{if(!draggedTask||event.target.closest(".task-card"))return;event.preventDefault();event.stopPropagation();list.classList.remove("drag-over");moveTask(draggedTask,list.dataset.dropColumn,null);});
+    boardEl.querySelectorAll(".column").forEach(column=>{
+      const list=column.querySelector(".column-list");
+      column.addEventListener("dragover",event=>{if(!draggedTask)return;event.preventDefault();event.dataTransfer.dropEffect="move";});
+      column.addEventListener("dragleave",event=>{if(event.relatedTarget&&column.contains(event.relatedTarget))return;list.classList.remove("drag-over");});
+      column.addEventListener("drop",event=>{if(!draggedTask||event.target.closest(".task-card"))return;event.preventDefault();event.stopPropagation();list.classList.remove("drag-over");const first=event.target.closest(".column-header")?list.querySelector(".task-card:not(.dragging)"):null;moveTask(draggedTask,column.dataset.columnId,first?first.dataset.taskId:null);});
     });
     boardEl.querySelectorAll("[data-column-grip]").forEach(header=>{
       header.addEventListener("dragstart",event=>{draggedColumn=header.dataset.columnGrip;draggedTask=null;event.dataTransfer.setData("text/plain",draggedColumn);event.dataTransfer.effectAllowed="move";});
@@ -304,6 +349,7 @@
   function moveTask(taskId,destinationId,beforeId){
     if(taskId===beforeId)return;const original=state.tasks.find(task=>task.id===taskId);
     if(!original||!state.columns.some(column=>column.id===destinationId))return;
+    draggedTask=null;stopTaskAutoScroll();
     const rows=state.tasks.filter(task=>task.columnId===destinationId&&task.id!==taskId).sort((a,b)=>(a.order||0)-(b.order||0));
     const at=beforeId?rows.findIndex(task=>task.id===beforeId):-1;rows.splice(at<0?rows.length:at,0,{...original,columnId:destinationId});
     state.tasks=state.columns.flatMap(column=>{const group=column.id===destinationId?rows:state.tasks.filter(task=>task.columnId===column.id&&task.id!==taskId).sort((a,b)=>(a.order||0)-(b.order||0));return group.map((task,index)=>({...task,order:index}));});
