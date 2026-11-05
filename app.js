@@ -1,11 +1,11 @@
 (function(){
   "use strict";
-  const LEGACY_KEY="gtd-taskmanager-v1",DATABASE_NAME="gtd-taskmanager",STORE_NAME="app-data",WORKSPACE_KEY="board",MAX_IMAGE_BYTES=1024*1024;
+  const LEGACY_KEY="gtd-taskmanager-v1",DATABASE_NAME="gtd-taskmanager",STORE_NAME="app-data",WORKSPACE_KEY="board",AUTO_BACKUP_DIRECTORY_KEY="auto-backup-directory",AUTO_BACKUP_ENABLED_KEY="auto-backup-enabled",MAX_IMAGE_BYTES=1024*1024;
   const IMAGE_MIME_TYPES=new Set(["image/png","image/jpeg","image/webp"]),EMBEDDED_IMAGE_MIME_TYPES=new Set([...IMAGE_MIME_TYPES,"image/gif","image/avif","image/apng"]);
   const newId=prefix=>prefix+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
   const starter=()=>({columns:[{id:"inbox",name:"Eingang"},{id:"next",name:"Als Nächstes"},{id:"doing",name:"In Arbeit"},{id:"done",name:"Erledigt"}],tasks:[],labels:[]});
   const createWorkspace=(data=starter())=>({activeBoardId:"board-default",boards:[{id:"board-default",name:"Aufgaben",data}]});
-  let workspace=createWorkspace(),state=workspace.boards[0].data,draggedTask=null,draggedColumn=null,toastTimer=0,databasePromise=null,persistenceQueue=Promise.resolve(),persistenceHealthy=true,storageWarningShown=false,boardChannel=null;
+  let workspace=createWorkspace(),state=workspace.boards[0].data,draggedTask=null,draggedColumn=null,toastTimer=0,databasePromise=null,persistenceQueue=Promise.resolve(),automaticBackupQueue=Promise.resolve(),backupDirectoryHandle=null,automaticBackupEnabled=false,automaticBackupMessage="",automaticBackupWarningShown=false,persistenceHealthy=true,storageWarningShown=false,boardChannel=null;
   const $=id=>document.getElementById(id),boardEl=$("board");
   const boardViewport=boardEl.closest(".board-viewport");
   let dragScrollPoint=null,dragScrollFrame=0,dragScrollLastTime=0;
@@ -83,6 +83,48 @@
       transaction.onabort=()=>reject(transaction.error||new Error("Das Speichern der Boarddaten wurde abgebrochen."));
     });
   }
+  async function readStoredBackupDirectory(){
+    const db=await openDatabase();
+    return new Promise((resolve,reject)=>{
+      let value;
+      const transaction=db.transaction(STORE_NAME,"readonly"),request=transaction.objectStore(STORE_NAME).get(AUTO_BACKUP_DIRECTORY_KEY);
+      request.onsuccess=()=>{value=request.result||null;};
+      transaction.oncomplete=()=>resolve(value);
+      transaction.onerror=()=>reject(transaction.error||request.error||new Error("Der automatische Exportordner konnte nicht gelesen werden."));
+      transaction.onabort=()=>reject(transaction.error||new Error("Das Lesen des automatischen Exportordners wurde abgebrochen."));
+    });
+  }
+  async function writeStoredBackupDirectory(handle){
+    const db=await openDatabase();
+    return new Promise((resolve,reject)=>{
+      const transaction=db.transaction(STORE_NAME,"readwrite");
+      transaction.objectStore(STORE_NAME).put(handle,AUTO_BACKUP_DIRECTORY_KEY);
+      transaction.oncomplete=()=>resolve();
+      transaction.onerror=()=>reject(transaction.error||new Error("Der automatische Exportordner konnte nicht gespeichert werden."));
+      transaction.onabort=()=>reject(transaction.error||new Error("Das Speichern des automatischen Exportordners wurde abgebrochen."));
+    });
+  }
+  async function readStoredAutoBackupEnabled(){
+    const db=await openDatabase();
+    return new Promise((resolve,reject)=>{
+      let value;
+      const transaction=db.transaction(STORE_NAME,"readonly"),request=transaction.objectStore(STORE_NAME).get(AUTO_BACKUP_ENABLED_KEY);
+      request.onsuccess=()=>{value=request.result;};
+      transaction.oncomplete=()=>resolve(value);
+      transaction.onerror=()=>reject(transaction.error||request.error||new Error("Die Einstellung für den automatischen Export konnte nicht gelesen werden."));
+      transaction.onabort=()=>reject(transaction.error||new Error("Das Lesen der Export-Einstellung wurde abgebrochen."));
+    });
+  }
+  async function writeStoredAutoBackupEnabled(enabled){
+    const db=await openDatabase();
+    return new Promise((resolve,reject)=>{
+      const transaction=db.transaction(STORE_NAME,"readwrite");
+      transaction.objectStore(STORE_NAME).put(Boolean(enabled),AUTO_BACKUP_ENABLED_KEY);
+      transaction.oncomplete=()=>resolve();
+      transaction.onerror=()=>reject(transaction.error||new Error("Die Einstellung für den automatischen Export konnte nicht gespeichert werden."));
+      transaction.onabort=()=>reject(transaction.error||new Error("Das Speichern der Export-Einstellung wurde abgebrochen."));
+    });
+  }
   function cloneBoard(value){return JSON.parse(JSON.stringify(value));}
   function validateEmbeddedImageSizes(markdown){
     const pattern=/data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/]*={0,2})/gi;let match;
@@ -134,9 +176,60 @@
     const active=workspace.boards.find(board=>board.id===(preferredBoardId||workspace.activeBoardId))||workspace.boards[0];
     workspace.activeBoardId=active.id;state=active.data;
   }
-  function save(){
+  function setAutomaticBackupStatus(message,isError=false){
+    automaticBackupMessage=message;
+    const status=$("autoBackupStatus");
+    if(status){status.textContent=message;status.classList.toggle("error",isError);}
+  }
+  function automaticBackupFileName(){return "aufgaben-backup-"+dateToday()+".json";}
+  async function writeAutomaticBackup(value){
+    const directory=backupDirectoryHandle;
+    if(!automaticBackupEnabled||!directory)return false;
+    const permission=await directory.queryPermission({mode:"readwrite"});
+    if(permission!=="granted"){
+      setAutomaticBackupStatus("Der Zugriff auf „"+directory.name+"“ muss erneuert werden.");
+      $("allowAutoBackupAccess").classList.remove("hidden");
+      if(!automaticBackupWarningShown){showToast("Automatischer Export pausiert. Erlaube den Ordnerzugriff unter Datensicherung.");automaticBackupWarningShown=true;}
+      return false;
+    }
+    const fileName=automaticBackupFileName(),backup={format:"gtd-taskmanager-backup",version:2,exportedAt:new Date().toISOString(),data:cloneBoard(value)};
+    const fileHandle=await directory.getFileHandle(fileName,{create:true}),writable=await fileHandle.createWritable();
+    try{await writable.write(JSON.stringify(backup,null,2));await writable.close();}
+    catch(error){try{await writable.abort();}catch(abortError){}throw error;}
+    if(backupDirectoryHandle===directory){setAutomaticBackupStatus("Aktualisiert: "+fileName);$("allowAutoBackupAccess").classList.add("hidden");}
+    automaticBackupWarningShown=false;
+    return true;
+  }
+  function queueAutomaticBackup(value){
+    automaticBackupQueue=automaticBackupQueue.catch(()=>false).then(()=>writeAutomaticBackup(value)).catch(error=>{
+      setAutomaticBackupStatus("Automatischer Export fehlgeschlagen: "+(error.message||"Schreibfehler."),true);
+      if(!automaticBackupWarningShown){showToast("Automatischer Export fehlgeschlagen. Öffne die Datensicherung für Details.");automaticBackupWarningShown=true;}
+      return false;
+    });
+    return automaticBackupQueue;
+  }
+  async function refreshAutomaticBackupUi(){
+    const toggle=$("autoBackupToggle"),actions=$("autoBackupActions"),choose=$("chooseAutoBackupDirectory"),allow=$("allowAutoBackupAccess"),status=$("autoBackupStatus");
+    toggle.checked=automaticBackupEnabled;
+    if(!automaticBackupEnabled){actions.classList.add("hidden");status.classList.add("hidden");setAutomaticBackupStatus("");return;}
+    actions.classList.remove("hidden");status.classList.remove("hidden");choose.classList.remove("hidden");
+    if(!window.showDirectoryPicker){choose.disabled=true;allow.classList.add("hidden");setAutomaticBackupStatus("In diesem Browser nicht verfügbar.",true);return;}
+    choose.disabled=false;choose.textContent=backupDirectoryHandle?"Zielordner ändern":"Zielordner wählen";
+    if(!backupDirectoryHandle){allow.classList.add("hidden");setAutomaticBackupStatus("Zielordner auswählen.");return;}
+    try{
+      const permission=await backupDirectoryHandle.queryPermission({mode:"readwrite"});
+      if(permission==="granted"){
+        allow.classList.add("hidden");
+        if(!automaticBackupMessage)setAutomaticBackupStatus("Zielordner: „"+backupDirectoryHandle.name+"“");
+      }else{
+        allow.classList.remove("hidden");setAutomaticBackupStatus("Zugriff auf „"+backupDirectoryHandle.name+"“ erforderlich.");
+      }
+    }catch(error){allow.classList.remove("hidden");setAutomaticBackupStatus("Der Zugriff auf den Zielordner muss erneuert werden.");}
+  }
+  function save(autoExport=true){
     const snapshot=cloneBoard(workspace);
     persistenceQueue=persistenceQueue.catch(()=>false).then(()=>writeStoredWorkspace(snapshot)).then(()=>{persistenceHealthy=true;storageWarningShown=false;publishWorkspace(snapshot);return true;}).catch(()=>{persistenceHealthy=false;if(!storageWarningShown){showToast("IndexedDB konnte nicht speichern. Prüfe die Browsereinstellungen oder den verfügbaren Speicherplatz.");storageWarningShown=true;}return false;});
+    if(autoExport&&automaticBackupEnabled)persistenceQueue.then(saved=>{if(saved&&backupDirectoryHandle)queueAutomaticBackup(snapshot);});
     return persistenceQueue;
   }
   function normalizeBackup(raw){
@@ -186,6 +279,12 @@
       if(!loaded)useWorkspace(readLegacyBoard()||createWorkspace());persistenceHealthy=false;
       showToast("IndexedDB konnte nicht geladen werden. Änderungen werden möglicherweise nicht dauerhaft gespeichert.");
     }finally{
+      try{
+        backupDirectoryHandle=await readStoredBackupDirectory();
+        const storedEnabled=await readStoredAutoBackupEnabled();
+        automaticBackupEnabled=storedEnabled===undefined?Boolean(backupDirectoryHandle):storedEnabled===true;
+        if(storedEnabled===undefined&&automaticBackupEnabled)await writeStoredAutoBackupEnabled(true);
+      }catch(error){backupDirectoryHandle=null;automaticBackupEnabled=false;}
       render();document.body.dataset.storageLoading="false";
     }
   }
@@ -260,7 +359,7 @@
     const due=task.dueDate?'<span class="due-date '+(task.dueDate<dateToday()?"overdue":task.dueDate===dateToday()?"today":"")+'"><svg><use href="#i-calendar"/></svg>'+esc(prettyDate(task.dueDate))+'</span>':"";
     const desc=plainDescription(task.description);
     const footer=due||labels?'<div class="card-meta">'+due+(labels?'<div class="card-labels">'+labels+'</div>':"")+'</div>':"";
-    return '<article class="task-card" draggable="true" data-task-id="'+esc(task.id)+'" tabindex="0" aria-label="'+esc(task.title)+'"><div class="card-top"><div class="card-title">'+esc(task.title)+'</div><button type="button" class="icon-button card-edit" data-edit-task="'+esc(task.id)+'" aria-label="Task bearbeiten"><svg><use href="#i-edit"/></svg></button></div>'+(desc?'<div class="card-description">'+esc(desc)+'</div>':"")+footer+'</article>';
+    return '<article class="task-card" data-task-id="'+esc(task.id)+'" tabindex="0" aria-label="'+esc(task.title)+'"><div class="card-top"><button type="button" class="icon-button task-drag-handle" draggable="true" data-task-drag-handle="'+esc(task.id)+'" aria-label="Task verschieben" title="Task verschieben · Mit ↑ und ↓ sortieren" aria-keyshortcuts="ArrowUp ArrowDown"><svg><use href="#i-grip"/></svg></button><div class="card-title">'+esc(task.title)+'</div><button type="button" class="icon-button card-edit" data-edit-task="'+esc(task.id)+'" aria-label="Task bearbeiten"><svg><use href="#i-edit"/></svg></button></div>'+(desc?'<div class="card-description">'+esc(desc)+'</div>':"")+footer+'</article>';
   }
   function columnHtml(column){
     const tasks=tasksIn(column.id),query=$("searchInput").value.trim().toLowerCase();
@@ -340,12 +439,23 @@
   function bindBoardEvents(){
     boardEl.querySelectorAll(".task-card").forEach(card=>{
       card.addEventListener("click",event=>{if(event.target.closest("button"))return;openTask(card.dataset.taskId);});
-      card.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openTask(card.dataset.taskId);}});
-      card.addEventListener("dragstart",event=>{draggedTask=card.dataset.taskId;draggedColumn=null;event.dataTransfer.setData("text/plain",draggedTask);event.dataTransfer.effectAllowed="move";card.classList.add("dragging");});
+      card.addEventListener("keydown",event=>{if(event.target!==card)return;if(event.key==="Enter"||event.key===" "){event.preventDefault();openTask(card.dataset.taskId);}});
+      card.addEventListener("dragstart",event=>{if(!event.target.closest?.(".task-drag-handle")){event.preventDefault();return;}draggedTask=card.dataset.taskId;draggedColumn=null;event.dataTransfer.setData("text/plain",draggedTask);event.dataTransfer.effectAllowed="move";card.classList.add("dragging");});
       card.addEventListener("dragover",event=>{if(!draggedTask)return;event.preventDefault();event.stopPropagation();});
       card.addEventListener("dragleave",event=>{if(event.relatedTarget&&card.contains(event.relatedTarget))return;card.classList.remove("drop-target","drop-before","drop-after");});
       card.addEventListener("drop",event=>{if(!draggedTask)return;event.preventDefault();event.stopPropagation();if(card.dataset.taskId===draggedTask)return;const destinationId=card.closest(".column").dataset.columnId;const ordered=tasksIn(destinationId).filter(task=>task.id!==draggedTask);const targetIndex=ordered.findIndex(task=>task.id===card.dataset.taskId);const rect=card.getBoundingClientRect();const after=event.clientY>rect.top+rect.height/2;const before=ordered[targetIndex+(after?1:0)];moveTask(draggedTask,destinationId,before?before.id:null);});
     });
+    boardEl.querySelectorAll("[data-task-drag-handle]").forEach(handle=>handle.addEventListener("keydown",event=>{
+      if(event.key!=="ArrowUp"&&event.key!=="ArrowDown")return;
+      event.preventDefault();event.stopPropagation();
+      const taskId=handle.dataset.taskDragHandle,task=state.tasks.find(item=>item.id===taskId);if(!task)return;
+      const ordered=tasksIn(task.columnId),index=ordered.findIndex(item=>item.id===taskId),nextIndex=index+(event.key==="ArrowUp"?-1:1);
+      if(nextIndex<0||nextIndex>=ordered.length)return;
+      const before=event.key==="ArrowUp"?ordered[index-1]:ordered[index+2];
+      moveTask(taskId,task.columnId,before?before.id:null);
+      const nextHandle=[...boardEl.querySelectorAll("[data-task-drag-handle]")].find(item=>item.dataset.taskDragHandle===taskId);
+      if(nextHandle)nextHandle.focus();
+    }));
     boardEl.querySelectorAll(".column").forEach(column=>{
       const list=column.querySelector(".column-list");
       column.addEventListener("dragover",event=>{if(!draggedTask)return;event.preventDefault();event.dataTransfer.dropEffect="move";});
@@ -373,6 +483,15 @@
   }
   function reorderColumn(sourceId,targetId){if(sourceId===targetId)return;const from=state.columns.findIndex(column=>column.id===sourceId),to=state.columns.findIndex(column=>column.id===targetId);if(from<0||to<0)return;const [column]=state.columns.splice(from,1);state.columns.splice(to,0,column);save();render();}
   function fillColumnSelect(selected){$("taskColumn").innerHTML=state.columns.map(column=>'<option value="'+esc(column.id)+'">'+esc(column.name)+'</option>').join("");$("taskColumn").value=state.columns.some(column=>column.id===selected)?selected:state.columns[0].id;}
+  function setTaskTitleEditing(editing){
+    const input=$("taskTitle"),title=input.value.trim(),showEditor=editing||!title;
+    $("taskDialogTitle").textContent=title||"Task erstellen";
+    $("taskTitleDisplay").classList.toggle("hidden",showEditor);
+    input.classList.toggle("hidden",!showEditor);
+  }
+  $("taskTitleDisplay").addEventListener("click",()=>{setTaskTitleEditing(true);$("taskTitle").focus();});
+  $("taskTitle").addEventListener("input",()=>{$("taskDialogTitle").textContent=$("taskTitle").value.trim()||"Task erstellen";});
+  $("taskTitle").addEventListener("blur",()=>{if($("taskTitle").value.trim())setTaskTitleEditing(false);});
   function renderLabelPicker(selectedIds){
     const chosen=[...new Set(selectedIds||[])].slice(0,2);
     $("taskLabels").innerHTML=state.labels.length?state.labels.map(label=>'<label class="label-option" style="'+labelStyle(label.color)+'"><input type="checkbox" value="'+esc(label.id)+'" '+(chosen.includes(label.id)?"checked":"")+'><span class="label-dot"></span>'+esc(label.name)+'</label>').join(""):'<span class="helper-text">Noch keine Labels angelegt.</span>';
@@ -415,11 +534,10 @@
   function setDescriptionValue(value){const text=String(value||"");$("taskDescription").value=text;if(descriptionEditor)descriptionEditor.value(text);}
   function openTask(taskId,columnId){
     const task=taskId?state.tasks.find(item=>item.id===taskId):null;$("taskForm").dataset.taskId=task?task.id:"";
-    $("taskDialogTitle").textContent=task?"Task bearbeiten":"Task erstellen";$("taskEyebrow").textContent=task?"TASK-DETAILS":"NEUER EINTRAG";
-    $("taskTitle").value=task?task.title:"";$("taskDue").value=task?task.dueDate||"":"";
+    $("taskTitle").value=task?task.title:"";$("taskDue").value=task?task.dueDate||"":"";setTaskTitleEditing(!task);
     setDescriptionValue(task?task.description||"":"");fillColumnSelect(task?task.columnId:columnId||state.columns[0].id);renderLabelPicker(task?task.labelIds||[]:[]);setDescriptionEditing(false);
     $("createdAtNote").textContent=task&&task.createdAt?"Erstellt am "+new Intl.DateTimeFormat("de-DE",{dateStyle:"long"}).format(new Date(task.createdAt)):"Das Erstelldatum wird beim Speichern automatisch gesetzt.";
-    $("deleteTask").classList.toggle("hidden",!task);$("taskDialog").showModal();$("taskTitle").focus();
+    $("deleteTask").classList.toggle("hidden",!task);$("taskDialog").showModal();if(task)$("taskTitleDisplay").focus();else $("taskTitle").focus();
   }
   let descriptionEditing=false;
   function renderDescription(){
@@ -432,6 +550,8 @@
     if(descriptionEditor){$("taskDescription").classList.add("hidden");descriptionEditorContainer.classList.toggle("hidden",!editing);}
     else $("taskDescription").classList.toggle("hidden",!editing);
     $("copyDescription").classList.toggle("hidden",editing||!descriptionValue().trim());
+    $("saveDescription").classList.toggle("hidden",!editing);
+    $("descriptionActions").classList.toggle("hidden",!editing&&!descriptionValue().trim());
     if(!editing)renderDescription();
     else setTimeout(()=>{if(descriptionEditor){descriptionEditor.codemirror.refresh();descriptionEditor.codemirror.focus();}else $("taskDescription").focus();},0);
   }
@@ -464,6 +584,28 @@
     showToast(copied?"Beschreibung kopiert":"Beschreibung konnte nicht kopiert werden");
   }
   $("copyDescription").addEventListener("click",copyRenderedDescription);
+  $("saveDescription").addEventListener("click",async()=>{
+    const button=$("saveDescription"),board=state,id=$("taskForm").dataset.taskId;
+    const task=board.tasks.find(item=>item.id===id),description=descriptionValue();
+    if(!task){
+      setDescriptionEditing(false);$("descriptionDisplay").focus();
+      showToast("Beschreibung übernommen. Speichere den Task, um ihn anzulegen.");return;
+    }
+    const previousDescription=task.description;
+    button.disabled=true;task.description=description;
+    try{
+      const saved=await save();
+      if(!saved){
+        if(task.description===description)task.description=previousDescription;
+        return;
+      }
+      if(state===board)render();
+      if(state===board&&$("taskDialog").open&&$("taskForm").dataset.taskId===id&&descriptionValue()===description){
+        setDescriptionEditing(false);$("descriptionDisplay").focus();
+      }
+      showToast("Beschreibung gespeichert");
+    }finally{button.disabled=false;}
+  });
   $("descriptionDisplay").addEventListener("click",event=>{
     if(event.target.closest("a,input[type=checkbox]"))return;
     setDescriptionEditing(true);
@@ -514,11 +656,10 @@
     });
   });
   document.addEventListener("pointerdown",event=>{
-    const editorRoot=descriptionEditor?descriptionEditorContainer:$("taskDescription");
-    if(descriptionEditing&&!editorRoot.contains(event.target))setDescriptionEditing(false);
+    if(descriptionEditing&&!$("descriptionField").contains(event.target))setDescriptionEditing(false);
   });
   $("taskForm").addEventListener("submit",event=>{
-    event.preventDefault();const title=$("taskTitle").value.trim();if(!title){$("taskTitle").focus();return;}
+    event.preventDefault();const title=$("taskTitle").value.trim();if(!title){setTaskTitleEditing(true);$("taskTitle").focus();return;}
     const id=$("taskForm").dataset.taskId,old=state.tasks.find(task=>task.id===id),columnId=$("taskColumn").value;
     const labels=[...new Set([...$("taskLabels").querySelectorAll("input:checked")].map(input=>input.value))].slice(0,2);
     if(old&&old.columnId!==columnId)state.tasks=state.tasks.filter(task=>task.id!==old.id);
@@ -558,7 +699,43 @@
     applyDisplaySize(document.documentElement.dataset.displaySize==="small"?"large":"small");
     if(descriptionEditor)descriptionEditor.codemirror.refresh();
   });
-  $("dataTransferToggle").addEventListener("click",()=>{const status=$("dataTransferStatus");status.textContent="";status.classList.remove("error");$("dataDialog").showModal();});
+  $("dataTransferToggle").addEventListener("click",()=>{const status=$("dataTransferStatus");status.textContent="";status.classList.remove("error");$("dataDialog").showModal();refreshAutomaticBackupUi();});
+  $("autoBackupToggle").addEventListener("change",async()=>{
+    const toggle=$("autoBackupToggle"),enabled=toggle.checked,previous=automaticBackupEnabled;
+    if(enabled&&!window.showDirectoryPicker){toggle.checked=false;setAutomaticBackupStatus("In diesem Browser nicht verfügbar.",true);$("autoBackupStatus").classList.remove("hidden");return;}
+    automaticBackupEnabled=enabled;automaticBackupWarningShown=false;setAutomaticBackupStatus("");
+    try{await writeStoredAutoBackupEnabled(enabled);}
+    catch(error){automaticBackupEnabled=previous;toggle.checked=previous;setAutomaticBackupStatus("Die Einstellung konnte nicht gespeichert werden.",true);$("autoBackupStatus").classList.remove("hidden");return;}
+    await refreshAutomaticBackupUi();
+    if(enabled&&backupDirectoryHandle){
+      try{if(await backupDirectoryHandle.queryPermission({mode:"readwrite"})==="granted")await queueAutomaticBackup(cloneBoard(workspace));}
+      catch(error){setAutomaticBackupStatus("Der Zugriff auf den Zielordner muss erneuert werden.");}
+    }
+  });
+  $("chooseAutoBackupDirectory").addEventListener("click",async()=>{
+    if(!window.showDirectoryPicker){setAutomaticBackupStatus("In diesem Browser nicht verfügbar.",true);showToast("Der Browser unterstützt die automatische Ordnerauswahl nicht.");return;}
+    try{
+      const directory=await window.showDirectoryPicker({mode:"readwrite"});
+      backupDirectoryHandle=directory;automaticBackupWarningShown=false;automaticBackupMessage="";
+      let persisted=true;
+      try{await writeStoredBackupDirectory(directory);}catch(error){persisted=false;}
+      await refreshAutomaticBackupUi();
+      const exported=await queueAutomaticBackup(cloneBoard(workspace));
+      if(!persisted)setAutomaticBackupStatus((exported?"Tagesdatei aktualisiert. ":"Die Tagesdatei konnte nicht erstellt werden. ")+"Die Ordnerauswahl konnte nicht für den nächsten Start gespeichert werden.",true);
+    }catch(error){
+      if(error.name==="AbortError")return;
+      setAutomaticBackupStatus("Der Zielordner konnte nicht ausgewählt werden: "+(error.message||"Zugriff verweigert."),true);
+      showToast("Ordnerauswahl fehlgeschlagen. Details stehen in der Datensicherung.");
+    }
+  });
+  $("allowAutoBackupAccess").addEventListener("click",async()=>{
+    if(!automaticBackupEnabled||!backupDirectoryHandle)return;
+    try{
+      const permission=await backupDirectoryHandle.requestPermission({mode:"readwrite"});
+      if(permission!=="granted"){setAutomaticBackupStatus("Der Zugriff auf den Zielordner wurde nicht erlaubt.");return;}
+      automaticBackupWarningShown=false;await refreshAutomaticBackupUi();await queueAutomaticBackup(cloneBoard(workspace));
+    }catch(error){setAutomaticBackupStatus("Der Zugriff konnte nicht erneuert werden: "+(error.message||"Zugriff verweigert."),true);}
+  });
   $("exportData").addEventListener("click",async()=>{
     await persistenceQueue;
     let exportState=workspace;
