@@ -75,6 +75,7 @@ body[data-theme="dark"] .label-selection-note{color:#aaa3b0}
 .task-card.drop-target.drop-after{border-top:1px solid #ebe7ee;border-bottom:3px solid #817694;padding-top:13px;padding-bottom:9px}
 #columnDialog{width:min(750px,calc(100vw - 32px))}
 .task-card{background:var(--surface);color:var(--ink);border-color:#ebe7ee}
+.task-card:active{cursor:grabbing}
 body[data-theme="dark"] .task-card{background:#201e24;border-color:#3c3942}
 body[data-theme="dark"] .task-card .card-description,body[data-theme="dark"] .task-card .card-meta,body[data-theme="dark"] .task-card .due-date.overdue,body[data-theme="dark"] .task-card .due-date.today,body[data-theme="dark"] .task-card .card-edit{color:#fff}
 .description-display,.description-field textarea{background:#38343d;color:#fff;border-color:#514b58}

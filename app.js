@@ -359,7 +359,7 @@
     const due=task.dueDate?'<span class="due-date '+(task.dueDate<dateToday()?"overdue":task.dueDate===dateToday()?"today":"")+'"><svg><use href="#i-calendar"/></svg>'+esc(prettyDate(task.dueDate))+'</span>':"";
     const desc=plainDescription(task.description);
     const footer=due||labels?'<div class="card-meta">'+due+(labels?'<div class="card-labels">'+labels+'</div>':"")+'</div>':"";
-    return '<article class="task-card" data-task-id="'+esc(task.id)+'" tabindex="0" aria-label="'+esc(task.title)+'"><div class="card-top"><button type="button" class="icon-button task-drag-handle" draggable="true" data-task-drag-handle="'+esc(task.id)+'" aria-label="Task verschieben" title="Task verschieben · Mit ↑ und ↓ sortieren" aria-keyshortcuts="ArrowUp ArrowDown"><svg><use href="#i-grip"/></svg></button><div class="card-title">'+esc(task.title)+'</div><button type="button" class="icon-button card-edit" data-edit-task="'+esc(task.id)+'" aria-label="Task bearbeiten"><svg><use href="#i-edit"/></svg></button></div>'+(desc?'<div class="card-description">'+esc(desc)+'</div>':"")+footer+'</article>';
+    return '<article class="task-card" draggable="true" data-task-id="'+esc(task.id)+'" tabindex="0" aria-label="'+esc(task.title)+'"><div class="card-top"><div class="card-title">'+esc(task.title)+'</div><button type="button" class="icon-button card-edit" data-edit-task="'+esc(task.id)+'" aria-label="Task bearbeiten"><svg><use href="#i-edit"/></svg></button></div>'+(desc?'<div class="card-description">'+esc(desc)+'</div>':"")+footer+'</article>';
   }
   function columnHtml(column){
     const tasks=tasksIn(column.id),query=$("searchInput").value.trim().toLowerCase();
@@ -440,22 +440,11 @@
     boardEl.querySelectorAll(".task-card").forEach(card=>{
       card.addEventListener("click",event=>{if(event.target.closest("button"))return;openTask(card.dataset.taskId);});
       card.addEventListener("keydown",event=>{if(event.target!==card)return;if(event.key==="Enter"||event.key===" "){event.preventDefault();openTask(card.dataset.taskId);}});
-      card.addEventListener("dragstart",event=>{if(!event.target.closest?.(".task-drag-handle")){event.preventDefault();return;}draggedTask=card.dataset.taskId;draggedColumn=null;event.dataTransfer.setData("text/plain",draggedTask);event.dataTransfer.effectAllowed="move";card.classList.add("dragging");});
+      card.addEventListener("dragstart",event=>{draggedTask=card.dataset.taskId;draggedColumn=null;event.dataTransfer.setData("text/plain",draggedTask);event.dataTransfer.effectAllowed="move";card.classList.add("dragging");});
       card.addEventListener("dragover",event=>{if(!draggedTask)return;event.preventDefault();event.stopPropagation();});
       card.addEventListener("dragleave",event=>{if(event.relatedTarget&&card.contains(event.relatedTarget))return;card.classList.remove("drop-target","drop-before","drop-after");});
       card.addEventListener("drop",event=>{if(!draggedTask)return;event.preventDefault();event.stopPropagation();if(card.dataset.taskId===draggedTask)return;const destinationId=card.closest(".column").dataset.columnId;const ordered=tasksIn(destinationId).filter(task=>task.id!==draggedTask);const targetIndex=ordered.findIndex(task=>task.id===card.dataset.taskId);const rect=card.getBoundingClientRect();const after=event.clientY>rect.top+rect.height/2;const before=ordered[targetIndex+(after?1:0)];moveTask(draggedTask,destinationId,before?before.id:null);});
     });
-    boardEl.querySelectorAll("[data-task-drag-handle]").forEach(handle=>handle.addEventListener("keydown",event=>{
-      if(event.key!=="ArrowUp"&&event.key!=="ArrowDown")return;
-      event.preventDefault();event.stopPropagation();
-      const taskId=handle.dataset.taskDragHandle,task=state.tasks.find(item=>item.id===taskId);if(!task)return;
-      const ordered=tasksIn(task.columnId),index=ordered.findIndex(item=>item.id===taskId),nextIndex=index+(event.key==="ArrowUp"?-1:1);
-      if(nextIndex<0||nextIndex>=ordered.length)return;
-      const before=event.key==="ArrowUp"?ordered[index-1]:ordered[index+2];
-      moveTask(taskId,task.columnId,before?before.id:null);
-      const nextHandle=[...boardEl.querySelectorAll("[data-task-drag-handle]")].find(item=>item.dataset.taskDragHandle===taskId);
-      if(nextHandle)nextHandle.focus();
-    }));
     boardEl.querySelectorAll(".column").forEach(column=>{
       const list=column.querySelector(".column-list");
       column.addEventListener("dragover",event=>{if(!draggedTask)return;event.preventDefault();event.dataTransfer.dropEffect="move";});
